@@ -34,7 +34,7 @@ nadata_vol <- nadata %>% filter(series_type == "Original") %>%
                               "A2302358R", "A2302459A", "A2529213W")))
 
 #Selecting my unique data based on zID
-set.seed(5359063)
+set.seed(5555555)
 myseries <- nadata_vol %>%
   filter (`series_id` == sample(nadata_vol$`series_id` , 1), year(Quarter)>=1995)
 
