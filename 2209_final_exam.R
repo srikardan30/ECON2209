@@ -15,7 +15,7 @@ lfs_1 <- read_abs("6202.0", tables = 1) %>%
   )
 
 
-set.seed(5359063)
+set.seed(5555555)
 myseries <- lfs_1 %>%
   filter (`series_id` == sample (lfs_1$`series_id` , 1), year(Month)>=2000)
 
@@ -201,8 +201,8 @@ AMZN_stock %>% features(Close, unitroot_nsdiffs)
 #part d
 #all 3 of the graphs have different critical values, indicating that the data is different from each other 
 #The critical values are at different distance from the mean of zero because white noise is expected to lie within
-#±2/T?????????. T is the number of random numbers, which is 36, 360 and 1,000. The range expected for 36 random is ± 0.33. 
-#The range expected for 360 is ± 0.11. The range expected for 360 is ± 0.063.
+#Â±2/T?????????. T is the number of random numbers, which is 36, 360 and 1,000. The range expected for 36 random is Â± 0.33. 
+#The range expected for 360 is Â± 0.11. The range expected for 360 is Â± 0.063.
 
 
 
