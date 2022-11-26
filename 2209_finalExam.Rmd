@@ -1,0 +1,379 @@
+---
+title: "ECON2209 Final Exam 22T1"
+author: "Viraj Srikar Danthurty"
+date: "29/04/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r load-packages, include=FALSE}
+library(dplyr)
+library(magrittr)
+library(tsibble)
+library(knitr)
+library(fpp3)
+library(pander)
+library(readabs)
+```
+
+**Question 1**
+```{r, include=FALSE}
+lfs_1 <- read_abs("6202.0", tables = 1) %>%
+  filter(series_type=="Original") %>%
+  mutate (Month = yearmonth(date)) %>%
+  as_tsibble (
+    index = Month,
+    key = c (series_id)
+  )
+
+
+set.seed(5359063)
+myseries <- lfs_1 %>%
+  filter (`series_id` == sample (lfs_1$`series_id` , 1), year(Month)>=2000)
+```
+
+*(a)*\
+The data we will be looking at is **"Unemployed looked for full-time work; Persons;"**.
+
+```{r}
+myseries %>% gg_season(value)
+```
+There is a strong seasonal pattern that occurs in the data within the year, more observations are needed to further investigate the seasonal pattern in the data. 
+There is a pattern across the data, except for one year, where the value is at its highest at January and then decreases until July where the trend stabilises then rises towards December. There is one year, had to discern, where the pattern was not followed. The value kept increasing until July where the peak was hit and then there was a decrease in value. Since we are looking at the number of unemployed people seeking work, the seasonal pattern can be explained by the rise in demand casual employment during the summer season. 
+
+```{r}
+myseries %>% gg_subseries(value)
+```
+From the sub series graph we can see that January has the highest average across all the months, while November has the lowest. The trend is not consistent across all of the months. There is a hump shape created by the highest value points across all the months, with July having the highest peak. The level of the average seems to be decreasing from January until July where it is slightly steady. This observation was also pointed out in the gg_season graph. 
+
+\newpage
+```{r}
+myseries %>% gg_lag(value, geom = 'point', lags = 1:12)
+```
+From the lag plots above we can see that lag 1 shows the strongest correlation in data as all of the data points are closest to the 45 degree line than the other lag plots. Lag plot 12 also has most of its data points closest to the 45 degree line than the other plots, indicating a seasonal pattern that occurs every 12 months.  
+As we increase the lags, we can see that a pattern starts to emerge in the formation of the points. The points start to spiral around the 45 degree line, with lag 12 showing the strongest features of the pattern than the others. 
+
+\newpage
+```{r}
+myseries %>% ACF(value, lag_max = 48) %>% autoplot()
+```
+The ACF plot of the data shows a very interesting shape and pattern. The shape of the graph is described as 'scalloped'. This is due to the seasonality within the data. The slow decrease in the ACF as the lags increase is caused by the trend in the data. We can clearly see that at the lag points at 12, 24 and 48 is higher than the other points to the left of it. The ACF plot shows that there is a seasonal pattern at every 12 month interval from the initial data point.  
+
+\newpage
+Check if any Box-Cox transformations is needed for the data. 
+```{r}
+myseries %>% features(value, features = guerrero)
+```
+```{r}
+myseries %>% autoplot(box_cox(value, -0.281), color = "blue") + 
+  labs(title = "Box-Cox Transformed Graph")
+```
+As we can observe from the transformed graph using the lambda value, there is little difference between the Box-Cox and untransformed graph [BELOW]. The only thing that has changed is the y-axis scale and some small changes in variance which is hard to visually detect. Hence we can conclude that a transformation is not necessary for this dataset to achieve normalisation.  
+\newpage
+```{r}
+myseries %>% autoplot(value)
+```
+\newpage
+*(b)*\
+Create a training data set. 
+```{r}
+myseries_train <- myseries %>% filter(year(Month) < 2015)
+```
+
+To check I extracted the right data, 
+```{r}
+autoplot(myseries, value) +
+  autolayer(myseries_train, value, colour = "red") +
+  ggtitle("Training Data (RED) and myseries Data (BLACK)")
+```
+From this layered graph, I can conclude that I extracted the correct data. 
+
+To calculate the seasonal naïve forecast we run the following code. 
+```{r}
+fit <- myseries_train %>% model(
+  'Seasonal Naive' = SNAIVE(value))
+```
+
+\newpage
+Now we check the residuals of the model. 
+```{r, warning=FALSE}
+fit %>% gg_tsresiduals()
+```
+From the ACF plot, we can see that there is strong correlation in the data and the residuals plot does not resemble a normal distribution function. 
+
+Now we can produce a forecast using the seasonal naïve model. 
+```{r, message=FALSE}
+fc <- fit %>%
+  forecast(new_data = anti_join(myseries, myseries_train))
+fc %>% autoplot(myseries)
+```
+From the forecast, we can see that the seasonal naïve model captures the seasonal pattern in the data really well with the peak around December and January. The prediction intervals of the model is very wide which reflects variable historical data and uncertainty of forecasts in the future. 
+
+After forecasting, we check the accuracy of the model to the actual values. 
+```{r}
+fit %>% accuracy()
+fc %>% accuracy(myseries)
+```
+From the tables above, we can see that the accuracy of the fitted values is better than the forecast due to the lower RMSE value. 
+\newpage
+*(c)*\
+Apply the Holt-Winters’ multiplicative method and damped trend to the untransformed data. 
+```{r}
+fit <- myseries %>% 
+  model(
+    'Multiplicative' = ETS(value ~ error("M") + trend("A") + season("M")), 
+    'Damped Trend' = ETS(value ~ error("M") + trend("Ad") + season("M"))
+  )
+
+#Now we plot the models 12 periods ahead. 
+fc <- fit %>% forecast(h = 12)
+fc %>% autoplot(filter(myseries, year(Month) > 2015))
+```
+From the graph we can clearly observe that the damped tend model is more accurate than the multiplicative. The damped model has a more sensible point forecast based on the historical data. The multiplicative trend model has a lower prediction interval than the damped trend, reflecting their respective point forecasts.  
+
+Now we check which model is more accurate. 
+```{r}
+pander(accuracy(fit) %>% select(.model, .type, RMSE:MAPE))
+```
+From the table above, we can clearly see that the RMSE for the damped trend is lower compared to the multiplicative trend. Hence I would prefer to use the damped trend model to forecast. 
+\newpage
+*(d)*\
+```{r}
+fit <- myseries_train %>% 
+  model(
+    'Multiplicative' = ETS(value ~ error("M") + trend("A") + season("M")), 
+    'Damped Trend' = ETS(value ~ error("M") + trend("Ad") + season("M")), 
+    'Seasonal Naive Model' = SNAIVE(value), 
+    'Drift Model' = RW(value ~ drift()), 
+    'STL-ARIMA' = decomposition_model(STL(value), 
+                                      ARIMA(season_adjust))
+  )
+pander(accuracy(fit) %>% select(.model, .type, RMSE:MAPE))
+```
+When we observe all of the models that were trained using the training set, the best option is the STL-ARIMA model which has the lowest RMSE value out of all. 
+
+There is only a 0.01 error difference between the multiplicative and the damped trend ETS model. The seasonal naive model has the highest RMSE indicating it is not the best model to use for this data and produces large errors. 
+
+\newpage
+**Question 2**
+```{r, include=FALSE}
+nadata <- read_abs("5206.0", tables="6", check_local=FALSE) %>%
+  mutate(Quarter = yearquarter (date)) %>%
+  as_tsibble(
+    index = Quarter,
+    key = c (series_id)
+  )
+
+#Statistical Discrepancy
+nadata_vol <- nadata %>% filter(series_type == "Original") %>%
+  filter(!(`series_id` %in% c("A2323348A", "A2302356K",
+                              "A2302358R", "A2302459A", "A2529213W")))
+
+#Selecting my unique data based on zID
+set.seed(5359063)
+myseries <- nadata_vol %>%
+  filter (`series_id` == sample(nadata_vol$`series_id` , 1), year(Quarter)>=1995)
+
+#Extracting seasonally adjusted series 
+myseries_sa <- nadata %>%
+  filter(series_type == "Seasonally Adjusted") %>%
+  filter(series == myseries$series[1], year(Quarter)>=1995)
+```
+Using the data from the ECON2209 Course Project 22T1, we need develop an appropriate dynamic regression model with Fourier terms for seasonality. 
+
+```{r}
+fit <- myseries %>%
+  model(
+    'K_1' = ARIMA(log(value) ~ fourier(K = 1) + pdq(0:2, 0, 0:2) + PDQ(0:1, 0, 0:1)), 
+    'K_2' = ARIMA(log(value) ~ fourier(K = 2) + pdq(0:2, 0, 0:2) + PDQ(0:1, 0, 0:1)), 
+    'K_1_BoxCox' = ARIMA(box_cox(value, 1.61) ~ fourier(K = 1) + pdq(0:2, 0, 0:2) 
+                         + PDQ(0:1, 0, 0:1)), 
+    'K_2_BoxCox' = ARIMA(box_cox(value, 1.61) ~ fourier(K = 2) + pdq(0:2, 0, 0:2) 
+                         + PDQ(0:1, 0, 0:1)), 
+  )
+```
+In the above model function, I have added two types of dynamic regression models. The first type includes a log function and the second type includes the Box-Cox transformation value for my unique data from the CP (Box-Cox transformation was not needed for CP). I included the different types of models in the function to give variety and ensure that the best dynamic regression model is found. 
+
+After running the code, we need to check the AICc value to see which model is the best. 
+```{r}
+pander(glance(fit) %>% arrange(AICc) %>% select(.model, AICc))
+```
+From the table above we can see that the most appropriate dynamic regression model has 2 Fourier terms and includes a log function. It had the lowest AICc value hence we use that for modelling data. 
+\newpage
+Now we check the residuals of the K_2 model. 
+```{r}
+fit %>% select(K_2) %>% gg_tsresiduals()
+```
+We can observe that all of the lag points in the ACF plot are within the critical value range. This indicates that the residual series is white noise.
+
+We can also use the Ljung-Box test to confirm that the data resembles white noise. 
+
+To find the DOF, we can run the following code. 
+```{r}
+fit %>% select(K_2) %>% coefficients() %>% nrow()
+```
+```{r}
+fit %>% select(K_2) %>% augment() %>% 
+  features(.innov, ljung_box, dof = 5, lag = 24)
+```
+The large p-value allows us to accept the null hypothesis that there is no autocorrelation in the residuals and conclude that the data is white noise.  
+
+\newpage
+**Question 3**\
+
+*(a)*\
+Plot the daily closing stock price of Amazon. 
+```{r}
+AMZN_stock <- gafa_stock %>% filter(Symbol == "AMZN") %>% 
+  mutate(day = row_number()) %>% update_tsibble(index = day)
+
+AMZN_stock %>% autoplot(Close)
+```
+\newpage
+Plot the ACF and PACF plots. 
+```{r, warning=FALSE}
+AMZN_stock %>% gg_tsdisplay(Close, plot_type = "partial", lag_max = 50)
+```
+
+The daily closing price plot for Amazon shows a clear increasing linear trend and a moving average. The first 50 ACF plots values show a high correlation in data and is decreasing slowly. The PACF is showing a huge spike at lag 1 and there is no other visible pattern in the data. This indicates that there is a strong correlation in stock price data from the previous day. Stationary data should have a mean, autocorrelation and variance that does not change over time. Clearly from the observation above, these features are not present within the plots. These observations show strong non-stationary behaviors and differencing is needed to control and stabilise the data. 
+\newpage
+*(b)*\
+Test, using the R function, for stationarity in the data. 
+```{r}
+AMZN_stock %>% features(Close, unitroot_kpss)
+```
+From the table above we can see that the p-value is 1%. Since the p-value is less than 5% we can reject the null hypothesis, meaning the data is definitely not stationary.
+
+Since the data is proven to not be stationary, we should use differencing to make it stationary. To find out which types and order of differencing is required we can run the following code. 
+```{r}
+AMZN_stock %>% features(Close, unitroot_ndiffs)
+```
+From this test, we can see that a first order differencing is needed to make the data stationary. 
+
+```{r}
+AMZN_stock %>% features(Close, unitroot_nsdiffs)
+```
+From this test, we can see that no seasonal differencing is required to make the data stationary. This may be due to the fact that the data for stock prices is random and no seasonal pattern can emerge from that. 
+\newpage
+*(c)*\
+From the given graphs, it can be assessed that none of the autocorrelation lags lie outside of the 95% limit which indicates that the 3 graphs are **white noise**. The main observation from the graphs is that, the larger the data, the narrower the graph gets. We lose the detail that can be seen in the plot with 36 numbers in the plot with 360 numbers. We only see the most distinctive features of the graph, which is the large spikes. Also, as the number of random numbers increase, the critical valur range decreases in size. 
+
+*(d)*\
+The critical value (blue lines) depends on the number being observed. All white noise is supposed to lie within $\pm$ $\frac{2}{\sqrt{T}}$. 
+
+So for,
+
+36 numbers, the critical value range would be $\pm$$\frac{2}{\sqrt{36}}$ = $\pm$$\frac{1}{3}$. 
+
+360 numbers, the critical value is $\pm$$\frac{2}{\sqrt{360}}$ = $\pm$$\frac{1}{3\sqrt{10}}$.
+
+1000 numbers, the critical value is $\pm$$\frac{2}{\sqrt{1000}}$ = $\pm$$\frac{1}{5\sqrt{10}}$.
+
+As we can see by the equations above, as the number increases, the critical value range decreases. Which shows why the critical values are at different distances from the mean zero. 
+
+Since the three given graphs are using random numbers, the autocorrelation values, in direction and magnitude, are random. Due to this the graphs are unique to each other. Yet being random, all of the lag points lie within the given critical value range proving it is white noise. 
+
+\newpage
+**Question 4**
+
+*(a)*\
+Find the appropriate ARIMA model. 
+```{r}
+fit <- aus_airpassengers %>% model(ARIMA(Passengers))
+report(fit)
+```
+From the output, we can see that R has chosen a ARIMA(0,2,1) model. The chosen model states that a second order differencing is required to stabilise the data and also has a first order moving average part. 
+
+Now, we check the residuals to see it looks like white noise. 
+```{r}
+fit %>% gg_tsresiduals()
+```
+We can observe from ACF plot that all of the lag points lie within the critical value range, which indicates the data resembles white noise. 
+
+Now we forecast for the next 10 periods.
+```{r}
+fit %>% forecast(h = 10) %>% autoplot(aus_airpassengers)
+```
+\newpage
+*(b)*\
+\newpage
+*(c)*\
+```{r}
+fit <- aus_airpassengers %>% 
+  model(
+    'ARIMA' = ARIMA(Passengers), 
+    'ARIMA010 w/Drift' = ARIMA(Passengers ~ 1 + pdq(0,1,0))
+  )
+fit %>% forecast(h = 10) %>% autoplot(aus_airpassengers)
+```
+The point forecasts for the ARIMA(0,1,0) w/Drift was lower than the forecasts from part (a). The prediction interval also reflects that, being lower than the interval for part (a). The ARIMA(0,1,0) w/Drift gives us a damped forecast compared to the automatic ARIMA model.
+\newpage
+*(d)*\
+```{r}
+fit <- aus_airpassengers %>% 
+  model(
+    'ARIMA' = ARIMA(Passengers), 
+    'ARIMA010 w/Drift' = ARIMA(Passengers ~ 1 + pdq(0,1,0)),
+    'ARIMA212 w/Drift' = ARIMA(Passengers ~ 1 + pdq(2,1,2))
+  )
+fit %>% forecast(h = 10) %>% autoplot(aus_airpassengers)
+```
+The ARIMA(2,1,2) w/Drift and ARIMA(0,1,0) w/Drift are essentially on top of each other. The ARIMA(2,1,2) w/Drift model is more variable in its point forecasts than the ARIMA(0,1,0) w/Drift. There is a very small up and down in the value of the forecasts. The prediction interval is essentially the same as the ARIMA(0,1,0) w/Drift. 
+\newpage
+*(e)*\
+```{r, warning=FALSE}
+fit <- aus_airpassengers %>% 
+  model(
+    'ARIMA' = ARIMA(Passengers),
+    'ARIMA021 w/Constant' = ARIMA(Passengers ~ 1 + pdq(0,2,1))
+  ) 
+
+fit %>% forecast(h = 10) %>% autoplot(aus_airpassengers)
+```
+The model has a quadratic or higher order polynomial trend due to the constant being in the model. It provided an error on R, indicating that this method is meant to be avoided. The trend is higher than the automatic ARIMA model, reflected in the higher prediction interval of the forecast. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
