@@ -1,0 +1,369 @@
+---
+title: "ECON2209 Course Project"
+author: "Viraj Srikar Danthurty"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r load-packages, include=FALSE}
+library(dplyr)
+library(magrittr)
+library(tsibble)
+library(knitr)
+library(fpp3)
+library(pander)
+```
+
+```{r, include=FALSE}
+#Read data from ABS website
+library(readabs)
+nadata <- read_abs("5206.0", tables="6", check_local=FALSE) %>%
+  mutate(Quarter = yearquarter (date)) %>%
+  as_tsibble(
+    index = Quarter,
+    key = c (series_id)
+  )
+
+#Statistical Discrepancy
+nadata_vol <- nadata %>% filter(series_type == "Original") %>%
+  filter(!(`series_id` %in% c("A2323348A", "A2302356K",
+                              "A2302358R", "A2302459A", "A2529213W")))
+
+#Selecting my unique data based on zID
+set.seed(5359063)
+myseries <- nadata_vol %>%
+  filter (`series_id` == sample(nadata_vol$`series_id` , 1), year(Quarter)>=1995)
+
+#Extracting seasonally adjusted series 
+myseries_sa <- nadata %>%
+  filter(series_type == "Seasonally Adjusted") %>%
+  filter(series == myseries$series[1], year(Quarter)>=1995)
+```
+
+**Part 1: Data Exploration and Transformation**
+
+```{r, message=FALSE}
+myseries %>%
+  autoplot() +
+  autolayer(myseries_sa, .vars = value, colour="red") +
+  labs(y = "Volume Index",
+       title ="GVA (black) and Seasonally Adjusted GVA (red)",
+       subtitle = myseries$series[1])
+```
+
+*(a)*\
+The main cycle that can be seen here is the major dip in the GVA value (both seasonal and non-seasonal) that occurred between the years of 2007-09, during the time of the GFC. This caused an overall decrease in the good produced in Australia due to the overall slowdown of the global economy. There is another dip in the GVA value around the years of 2015-17. There is also a steep decrease in value in 2020 due to the start of the COVID-19 pandemic. 
+
+The trend of the data is constantly changing, or known as changing direction, and is not linear throughout the time frame. The trend of the graph was increasing until it encountered the GFC where the GVP value decreased. Then after 2010 there was an stable trend in the value of the GVP until a downturn in 2015-17. The GVP value then encountered another decreasing trend in 2020. 
+
+It is unclear from this graph whether there is a strong seasonal trend, but from initial observations there seems to be a seasonal pattern occurring in Q4 of every year. Further, more detailed, observations are needed to make an accurate statement on the strength of the seasonal pattern in the graph. 
+
+The seasonal data follows a similar trend, seasonal pattern and cycle as the *myseries* data. Between 2010-15 the seasonal data was not consistent with the sharp changes in value of those years. 
+
+There are no visible outliers within the data of both the *myseries* and the seasonal *myseries* data. 
+
+*(b)*\
+```{r}
+myseries %>% gg_season(value) + labs(title = "GVA Seasonal Plot")
+```
+From the graph a seasonal pattern can be seen. Around Q3 and Q4 the value amount increases steadily except for the year 2020. As we can see from the graph, there is a sharp decline in the GVP value. This can be attributed to the start of the COVID-19 pandemic which halted the Australian economy leading to the drop in GVP value. Q3 and Q4 of 2021 showed a higher rate of increase in value than any other year, towards the end of 2021 COVID-19 restrictions were heavily eased across Australia and it led to an extremely profitable restart of the economy. 
+
+There has also been a steady increase in the level of value as time goes on until the years of 2007-09 where the trend stagnated. This was due to the GFC and the economic impact it had upon the Australian economy. Through the help of the fiscal stimuli in those years it ensured a decline in the GVP value was minimsed.
+
+There is an overall trend in the graph which indicates that the GVP value has been rising as time goes on. 
+```{r}
+myseries %>% gg_subseries(value) + labs(title = "GVA Seasonal Subseries Plot")
+```
+The effects of the GFC during the years of 2007-09 can't really be seen in Q1 and Q2 but in Q4 it is very pronounced with a steep decline in the value. There is a higher average in Q4 than the other quarters, which back ups the point made in the gg_season observation where Q4 has a higher rate of increase in value. 
+
+The economic cycles can also be seen across all of the quarters. The effects of the GFC between 2007-09, the economic slowdown in 2015 (observed in Q1(a)) and the start of the COVID-19 pandemic in Australia. 
+```{r}
+myseries %>% gg_lag(value, geom = 'point', lags = 1:4) + labs(title = "GVA Lag Plot")
+```
+Lag plots 1 and 2 are the closest to the 45 degree line and don't deviate much, indicating a strong trend between those quarters.  
+```{r}
+myseries %>% ACF(value, lag_max = 24) %>% autoplot() + labs(title = "GVA ACF Plot")
+```
+In this plot there is a dominant trend for the first 8 lags (2 years prior). There is a strong ACF spike in lags 1, 2 and 4, similar to thew lag plot previously. 
+
+*(c)*\
+To find what type of Box Cox transformation is needed, we can use the Guerrero method. 
+```{r}
+myseries %>% features(value, features = guerrero)
+```
+If we use the given lambda value and transform the *myseries* graph using the Box-Cox transformation, we will obtain the following graph.  
+```{r}
+myseries %>% autoplot(box_cox(value, 1.61)) + labs(title = "Box-Cox Transformed Graph")
+```
+Compared to the original graph the only difference between the two is the y-axis scale in the Box-Cox transformation. There seems to be no major change in the variance between the original and transformed graph, hence it can be concluded that a Box-Cox transformation is not needed for this dataset. 
+\newpage
+**Part 2: Time Series Decomposition**
+
+*(a)*
+```{r}
+myseries_last10 <- myseries %>% filter(Quarter >= max(Quarter) - 39)
+myseries_last10 %>% model(stl = STL(value)) %>% components() %>% 
+  autoplot() + labs(title = "STL Decomposition")
+```
+*(b)*\
+```{r, message=FALSE, fig.show='hide'}
+#First obtain the seasonally adjusted data from the decomposition model 
+dcmp <- myseries_last10 %>% model(STL(value)) %>% components() %>% as_tsibble()
+dcmp %>% autoplot(season_adjust)
+
+#Then filter the last 10 years from the official seasonally adjusted data 
+offical_seasonAdjust <- myseries_sa %>% filter(Quarter >= max(Quarter) - 39)
+```
+```{r, message=FALSE}
+#Now plot them together 
+dcmp %>% autoplot(season_adjust, color = "black") + 
+  autolayer(offical_seasonAdjust, color = "red") + 
+  ggtitle("Officially Seasonally Adjusted (RED) and STL Seasonal Adjusted (BLACK)")
+```
+
+From the two plotted graphs above, we can see that both run extremely close together with minimal deviation. There are some areas where there is deviation between the two graphs. Mid 2012 to 2014 is one area where the two graphs are not running synchronously, the overall shape of the official data is different to the decomposition models seasonal data. Mid 2015 to 2016 is one area where both datasets were visually the same and ran on-top of each other. Overall, the official seasonal data given is extremely similar to the decomposition models seasonal data. 
+\newpage
+**Part 3: ETS Forecasting**
+
+*(a)*\
+We need to create the training set from the original *myseries* dataset. 
+```{r}
+myseries_train <- myseries %>% filter(Quarter <= yearquarter("2014 Q4"))
+```
+
+To check if we split the data properly, we can layer the training dataset over the original *myseries* data.
+```{r}
+autoplot(myseries, value) +
+  autolayer(myseries_train, value, colour = "red") +
+  ggtitle("Training Data Set (RED) and myseries Data Set (BLACK)")
+```
+
+From this layered graph we can clearly observe that we have split the training set appropriately. The training data set covers the original *myseries* data until Q4 2014 perfectly, which is what we wanted. 
+
+*(b)*\
+We can use R to find an appropriate ETS model to fit for the training data. 
+```{r}
+fit <- myseries_train %>% model(ETS(value)) 
+fit %>% report()
+```
+Using the default ETS() command on R, we can see that the program has chosen a ETS(A,Ad,A) model. 
+
+The model consists of an additive error and seasonal terms along with a Damped trend. 
+
+To check if this model is the best option for the training dataset, we check on its residuals. 
+```{r}
+fit %>% gg_tsresiduals()
+```
+Since there are no significant spikes in the ACF plot, we can say that the residuals are not correlated. Since all of the spikes are within the confidence interval, it can be said that it is white noise. 
+
+The histogram is near normal with it being nearly symmetric on both sides. 
+
+The residual plot is showing no visible pattern and is mainly centered around 0. 
+
+We can also run a Ljung-Box test to check if the data is really white noise. 
+```{r}
+augment(fit) %>%
+  features(.innov, ljung_box, lag = 24, dof = 10)
+```
+The DOF is 10 since there is 10 parameters in our model. 
+
+We can see from the large p-value, hence we can accept the null hypothesis that there is no autocorrelation in the residuals and conclude that the data is white noise.  
+
+*(c)*\
+```{r}
+fit %>%
+  forecast(h = 28) %>%
+  autoplot(filter_index(myseries_train, "2005 Q1" ~ "2021 Q4")) +
+  autolayer(filter_index(myseries, "2005 Q1" ~ "2021 Q4"), value, color = 'red')
+```
+The prediction intervals for this data is extremely wide. What we can understand is that there is a lot of uncertainty in the future GVP value over the seven quarter forecast period. Hence interpreting the point forecast without accounting for the very large uncertainty can be misleading. The wide prediction interval can also be a reflection of the variation in the historical data. 
+\
+\
+*(d)*\
+
+```{r}
+panderOptions('round', 2)
+panderOptions('digits', 6)
+panderOptions('keep.trailing.zeros', TRUE)
+pander(accuracy(fit) %>% select(.model, .type, RMSE:MAPE))
+```
+```{r}
+panderOptions('round', 2)
+panderOptions('digits', 6)
+panderOptions('keep.trailing.zeros', TRUE)
+pander(fit %>% forecast(h = 28) %>% accuracy(myseries) %>% 
+         select(.model, .type, RMSE:MAPE))
+```
+All of the data points from the original *myseries* graph lie within the 95% prediction interval. Looking at the forecasted data compared to the test data, it seems to follow the mean of the data before and is quite stable. The ETS model did not predict the cyclic behavior that the original data showed, with the downturn in 2015 and then the start of the COVID-19 pandemic. That sort of behavior is very tough to predict from past behavior hence why it wasn't modeled. The ETS model also predicted and modeled the seasonal behavior that is experienced in Q4 every year. We can observe from the RMSE of the training and test data that the ETS forecast is over-fitting, as Test (543.03) > Training (173.19).The residuals and the Ljung-Box test also prove that this ETS model is well suited and is quite accurate in its predictions. Overall, the model according to the residual diagnostics can be seen as accurate, the RMSE testing proves that the model is over fits and may be deemed inaccurate. 
+
+
+
+
+
+\newpage
+**Part 4: ARIMA Modelling**
+
+*(a)*
+
+```{r}
+myseries %>% autoplot(value)
+```
+
+From the plotted graph we can clearly see that the data is not stationary. 
+
+```{r}
+myseries %>% features(value, unitroot_kpss)
+```
+From the table above we can see that the p-value is 3.56%. Since the p-value is less than 5% we can reject the null hypothesis, meaning the data is definitely not stationary.  
+
+To make the data stationary, we can use transformations and differencing. 
+As observed and reported in Q1(c), the *myseries* data has a Box-Cox value of 1.61 and does not need to be transformed to decrease the variance in the data. Therefore we don't need to transform the data to achieve stationarity.   
+
+There is also a seasonal pattern within this graph. Due to this, a seasonal differencing is required to eliminate that pattern in the data. 
+
+A non-seasonal differencing is also required for this data. Since there clearly is a moving average present, we need to transform it so that we stablise the mean. 
+
+Therefore no Box-Cox transformation is needed and one difference and seasonal difference is required to make the data stationary. 
+
+To check the analysis we can run the following code. 
+```{r}
+#This code gives us the number of differences needed according to R
+myseries %>% features(value, unitroot_ndiffs)
+```
+```{r}
+#This code gives us the number of seasonal differences needed according to R
+myseries %>% features(value, unitroot_nsdiffs)
+```
+
+From the outputs above we can see that both a difference and seasonal difference are needed to make the data stationary. 
+
+*(b)*
+From the previous section, it was understood that both a difference and a seasonal difference was required to make the data stationary. Now we can go onto selecting the appropriate ARIMA model based on this information. 
+
+```{r, message=FALSE, warning=FALSE}
+myseries %>% gg_tsdisplay(difference(value, 4) %>% difference(), plot_type = 'partial')
+```
+Observing the ACF and PACF plots can help us calculate the seasonal and non-seasonal MA and AR parameters of the ARIMA model.
+
+From the PACF we can clearly see that there is an exponential decay in the seasonal lags (4, 8, 12, 16). Then there is a significant spike at lag 4 but nothing else in the ACF plot. This type of characteristic is seen in an ARIMA(0,0,0)(0,0,1), but since we have used seasonal and non-seasonal differencing, we need to change the degrees of differences in the seasonal and non-seasonal component to 1.
+The starting point will be an ARIMA(0,1,0)(0,1,1)[4] model. We will change some of the values to see which model is statistically the best option. 
+
+```{r}
+myseries_fit <- myseries %>%
+    model(
+      arima010011 = ARIMA(value ~ pdq(0,1,0) + PDQ(0,1,1)), 
+      arima010010 = ARIMA(value ~ pdq(0,1,0) + PDQ(0,1,0)), 
+      arima000001 = ARIMA(value ~ pdq(0,0,0) + PDQ(0,0,1))
+    )
+panderOptions('round', 2)
+panderOptions('digits', 6)
+panderOptions('keep.trailing.zeros', TRUE)
+pander(glance(myseries_fit) %>% select(.model, AIC, AICc, BIC))
+```
+From the table of values, we chose the model with the lowest AICc value. In this case, it would be the ARIMA(0,1,0)(0,1,1) model, which is the one that we predicted from observing the ACF and PACF tables. 
+
+To further check that this model is the right one, we can check its residuals. 
+```{r}
+myseries_fit %>% select(arima010011) %>% gg_tsresiduals()
+```
+The innovation residuals plot shows a mean around 0. 
+
+Observing the ACF plot we can see that all of the lag spikes are within the 95% confidence interval indicating that the data is consistent with white noise. 
+
+The histogram shows a distribution close to normal, with an outlier in the data towards the far left. 
+
+```{r}
+augment(myseries_fit) %>%
+  filter(.model == "arima010011") %>%
+  features(.innov, ljung_box, lag = 24, dof = 1)
+```
+As we can see from the Ljung-Box statistical test shows that the p-value is much greater than 5% which further confirms that the residuals are similar to white noise. 
+
+After running our seasonal ARIMA model, ARIMA(0,1,0)(0,1,1)[4], through a number of statistical tests we can see that it passed the required checks and is ready to be used for forecasting. 
+
+*(c)*\
+```{r}
+fit <- myseries_train %>%
+  model(
+    STL_ARIMA = decomposition_model(STL(value), 
+    ARIMA(season_adjust)),
+    
+    ETS_auto = ETS(value) 
+  )
+
+fit %>%
+  forecast(h = 28) %>%
+  autoplot(filter_index(myseries, "2005 Q1" ~ "2021 Q4")) 
+```
+
+Looking at the prediction intervals of the two graphs, we can see that the STL-ARIMA model has a much smaller interval range than the ETS model. Indicating a larger uncertainty in the future values based off the ETS model. Since our data has a seasonal pattern, the STL-ARIMA model is more accurate when forecasting future values. 
+
+We can check how accurate the models are. 
+```{r}
+panderOptions('round', 2)
+panderOptions('digits', 6)
+panderOptions('keep.trailing.zeros', TRUE)
+pander(fit %>% forecast(h = 28) %>% accuracy(myseries) %>% 
+         select(.model, .type, RMSE:MAPE))
+```
+As we can see, the STL-ARIMA model is the much better option due to its low RMSE value, further proving why the prediction interval for that model is much more smaller and narrower than the ETS. 
+
+To check if the prediction intervals are reliable, we can check their residuals. 
+
+```{r, warning=FALSE}
+fit %>% select(STL_ARIMA) %>% gg_tsresiduals()
+```
+We can see from the ACF plot that there is no significant spikes, indicating the data is resembling white noise. Observing the residuals plot, it is slightly skewed to the right. The mean is centered around 0, indicating no correlation in the series. 
+
+Residual analysis of the ETS model can be found in Q3(b). 
+
+As observed from the residual histograms for both models, they may lead to inaccurate prediction intervals for both models but we can still use them for forecasting. With the STL-ARIMA model being the better suited due to its lower RMSE value. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
