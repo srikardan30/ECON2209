@@ -28,7 +28,7 @@ lfs_1 <- read_abs("6202.0", tables = 1) %>%
   )
 
 
-set.seed(5359063)
+set.seed(5555555)
 myseries <- lfs_1 %>%
   filter (`series_id` == sample (lfs_1$`series_id` , 1), year(Month)>=2000)
 ```
